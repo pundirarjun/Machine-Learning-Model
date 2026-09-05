@@ -1,0 +1,29 @@
+Run instructions (Windows) — commands to reproduce improved experiments and generate submissions
+
+1) Create and activate a clean virtual environment (recommended)
+   python -m venv .venv
+   .\.venv\Scripts\activate
+
+2) Upgrade pip and install dependencies
+   python -m pip install --upgrade pip
+   pip install -r requirements.txt
+
+3) If you don't have requirements.txt, run:
+   pip install pandas numpy scikit-learn lightgbm xgboost optuna
+
+4) Run the improved pipeline (no tuning, faster):
+   python "Kaggle Compition\Predicting Student Health Risk\improved_pipeline.py" --tune False --n_folds 5
+
+   This will write per-model submissions and per-model probas to submissions/ (files named like lgbm_probas.npz and submission_lgbm_cvavg.csv)
+
+5) Run stacking to train a meta-model on OOF probabilities and produce a stacked submission:
+   python "Kaggle Compition\Predicting Student Health Risk\stacking.py"
+
+6) If you want to run randomized tuning (slow):
+   python "Kaggle Compition\Predicting Student Health Risk\improved_pipeline.py" --tune True --n_folds 5 --n_iter 24
+
+7) Optional: use Optuna for better tuning. See optuna_tuner.py (not included) or modify improved_pipeline.py to use Optuna.
+
+Notes:
+- Running with --tune True can be time-consuming depending on n_iter and data size. Start without tuning first to get fast CV-based submissions.
+- Ensure your Python environment can install binaries: on some restricted machines pip installs will fail due to policy (DLL load failed). Run these commands on your local machine if you hit errors here.
