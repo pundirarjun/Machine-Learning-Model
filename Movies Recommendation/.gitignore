@@ -1,2 +1,18 @@
 .streamlit/secrets.toml
 .env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Editors / tooling
+.vscode/
+.idea/
+.kilo/
+*.log
+
+# Build output
+dist/
+dist-ssr/
+*.local

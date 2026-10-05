@@ -1,7 +1,27 @@
+from pathlib import Path
+
 import numpy as np
 
 from data_loader import load_data
 from model import MatrixFactorization
+
+
+# ============================================================
+# CONFIG
+# ============================================================
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+MODEL_PATH = PROJECT_ROOT / "model_weights.npz"
+
+HISTORY_PATH = PROJECT_ROOT / "training_history.npz"
+
+POPULARITY_PATH = PROJECT_ROOT / "movie_popularity.npy"
+
+SEED = 42
+
+
+np.random.seed(SEED)
 
 
 # ============================================================
@@ -49,7 +69,7 @@ movie_rating_counts = (
 )
 
 np.save(
-    "../movie_popularity.npy",
+    POPULARITY_PATH,
     movie_rating_counts
 )
 
@@ -118,7 +138,7 @@ print("Training finished!")
 # ============================================================
 
 np.savez(
-    "../model_weights.npz",
+    MODEL_PATH,
     P=model.P,
     Q=model.Q,
     b_u=model.b_u,
@@ -139,7 +159,7 @@ np.savez(
 # ============================================================
 
 np.savez(
-    "../training_history.npz",
+    HISTORY_PATH,
     train_rmse=np.array(
         model.train_rmse_history
     ),

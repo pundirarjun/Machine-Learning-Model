@@ -1,4 +1,8 @@
-streamlit
+flask
+flask-cors
+python-dotenv
+requests
 numpy
 pandas
 numba
+matplotlib

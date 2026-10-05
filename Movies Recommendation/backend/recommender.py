@@ -1,11 +1,11 @@
 from pathlib import Path
-from functools import lru_cache
 
 import numpy as np
 import pandas as pd
 import requests
 import os
 import re
+import time
 from urllib.parse import quote
 
 from dotenv import load_dotenv
@@ -296,10 +296,55 @@ def get_youtube_search_url(title):
 
 
 # ============================================================
+# SMALL TTL CACHE
+# ============================================================
+#
+# Stable lookups ("this movie really has no poster") are kept
+# forever, while transient network failures are kept only
+# briefly so they are retried instead of being remembered for
+# the lifetime of the process.
+#
+
+FAILURE_TTL_SECONDS = 300
+
+
+def _cache_put(cache, key, value, stable):
+
+    expires = (
+        None
+        if stable
+        else time.time() + FAILURE_TTL_SECONDS
+    )
+
+    cache[key] = (value, expires)
+
+
+def _cache_get(cache, key):
+
+    entry = cache.get(key)
+
+    if entry is None:
+
+        return None, False
+
+    value, expires = entry
+
+    if expires is not None and time.time() > expires:
+
+        cache.pop(key, None)
+
+        return None, False
+
+    return value, True
+
+
+# ============================================================
 # TMDB MOVIE MEDIA
 # ============================================================
 
-@lru_cache(maxsize=1000)
+_movie_media_cache = {}
+
+
 def get_movie_media(title):
 
     """
@@ -335,6 +380,47 @@ def get_movie_media(title):
         }
 
 
+    cached, found = _cache_get(
+        _movie_media_cache,
+        title
+    )
+
+    if found:
+
+        return cached
+
+
+    media, stable = _fetch_movie_media(title)
+
+    _cache_put(
+        _movie_media_cache,
+        title,
+        media,
+        stable
+    )
+
+
+    return media
+
+
+def _fetch_movie_media(title):
+
+    """
+    Resolve TMDB media for a title.
+
+    Returns (media, stable) where stable is False for
+    transient failures, which are only cached briefly.
+    """
+
+    if not title:
+
+        return ({
+            "poster": None,
+            "trailer": None,
+            "poster_type": "none"
+        }, True)
+
+
     # --------------------------------------------------------
     # API KEY CHECK
     # --------------------------------------------------------
@@ -345,7 +431,7 @@ def get_movie_media(title):
             "TMDB API key missing."
         )
 
-        return {
+        return ({
             "poster": create_fallback_poster(
                 title
             ),
@@ -353,7 +439,7 @@ def get_movie_media(title):
                 title
             ),
             "poster_type": "fallback"
-        }
+        }, True)
 
 
     clean_title = clean_movie_title(
@@ -421,8 +507,10 @@ def get_movie_media(title):
                 clean_title
             )
 
-            return build_fallback_media(
-                title
+            # Transient failure: do not cache.
+            return (
+                build_fallback_media(title),
+                False
             )
 
 
@@ -457,6 +545,14 @@ def get_movie_media(title):
                     []
                 )
 
+            else:
+
+                # Transient failure: do not cache.
+                return (
+                    build_fallback_media(title),
+                    False
+                )
+
 
         if not results:
 
@@ -465,8 +561,10 @@ def get_movie_media(title):
                 clean_title
             )
 
-            return build_fallback_media(
-                title
+            # Stable fact: this title has no TMDB match.
+            return (
+                build_fallback_media(title),
+                True
             )
 
 
@@ -605,7 +703,7 @@ def get_movie_media(title):
             poster_type = "fallback"
 
 
-        return {
+        return ({
 
             "poster":
                 poster,
@@ -615,7 +713,7 @@ def get_movie_media(title):
 
             "poster_type":
                 poster_type
-        }
+        }, True)
 
 
     except requests.RequestException as e:
@@ -625,8 +723,10 @@ def get_movie_media(title):
             e
         )
 
-        return build_fallback_media(
-            title
+        # Transient failure: do not cache.
+        return (
+            build_fallback_media(title),
+            False
         )
 
 
@@ -637,8 +737,10 @@ def get_movie_media(title):
             e
         )
 
-        return build_fallback_media(
-            title
+        # Transient failure: do not cache.
+        return (
+            build_fallback_media(title),
+            False
         )
 
 
@@ -646,13 +748,49 @@ def get_movie_media(title):
 # TMDB TRAILER
 # ============================================================
 
-@lru_cache(maxsize=1000)
+_trailer_cache = {}
+
+
 def get_tmdb_trailer(tmdb_id):
+
+    """
+    Resolve a YouTube trailer URL for a TMDB movie id.
+
+    Transient failures are only cached briefly so they are
+    retried later.
+    """
 
     if not tmdb_id:
 
         return None
 
+
+    cached, found = _cache_get(
+        _trailer_cache,
+        tmdb_id
+    )
+
+    if found:
+
+        return cached
+
+
+    trailer, stable = _fetch_tmdb_trailer(tmdb_id)
+
+    _cache_put(
+        _trailer_cache,
+        tmdb_id,
+        trailer,
+        stable
+    )
+
+
+    return trailer
+
+
+def _fetch_tmdb_trailer(tmdb_id):
+
+    """Returns (trailer_url_or_None, stable)."""
 
     try:
 
@@ -683,7 +821,8 @@ def get_tmdb_trailer(tmdb_id):
 
         if response.status_code != 200:
 
-            return None
+            # Transient failure: do not cache.
+            return (None, False)
 
 
         videos = response.json().get(
@@ -711,7 +850,8 @@ def get_tmdb_trailer(tmdb_id):
 
         if not youtube_videos:
 
-            return None
+            # Stable fact: no YouTube videos on TMDB.
+            return (None, True)
 
 
         # ====================================================
@@ -807,11 +947,12 @@ def get_tmdb_trailer(tmdb_id):
 
                 return (
                     "https://www.youtube.com/watch?v="
-                    + key
+                    + key,
+                    True
                 )
 
 
-        return None
+        return (None, True)
 
 
     except Exception as e:
@@ -821,7 +962,8 @@ def get_tmdb_trailer(tmdb_id):
             e
         )
 
-        return None
+        # Transient failure: do not cache.
+        return (None, False)
 
 
 # ============================================================

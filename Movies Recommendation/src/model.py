@@ -86,6 +86,9 @@ def validation_rmse(
 ):
     total_err = 0.0
 
+    if len(order) == 0:
+        return np.nan
+
     for j in range(len(order)):
 
         i = order[j]
@@ -189,9 +192,50 @@ class MatrixFactorization:
             dtype=np.float32
         )
 
-        self.global_mean = float(
-            ratings.mean()
-        )
+        # ----------------------------------------------------
+        # Input validation
+        #
+        # The Numba kernels run without bounds checking, so an
+        # out-of-range index would silently corrupt memory
+        # instead of raising. Validate up front.
+        # ----------------------------------------------------
+
+        if not (
+            len(user_idx)
+            == len(item_idx)
+            == len(ratings)
+        ):
+
+            raise ValueError(
+                "user_idx, item_idx and ratings "
+                "must have the same length."
+            )
+
+        if len(user_idx) == 0:
+
+            raise ValueError(
+                "No ratings to train on."
+            )
+
+        if (
+            user_idx.min() < 0
+            or user_idx.max() >= self.P.shape[0]
+        ):
+
+            raise ValueError(
+                "user_idx out of range for P with "
+                f"shape {self.P.shape}."
+            )
+
+        if (
+            item_idx.min() < 0
+            or item_idx.max() >= self.Q.shape[0]
+        ):
+
+            raise ValueError(
+                "item_idx out of range for Q with "
+                f"shape {self.Q.shape}."
+            )
 
         n = len(ratings)
 
@@ -213,6 +257,25 @@ class MatrixFactorization:
         train_order = order[:split]
         val_order = order[split:]
 
+        if not 0.0 <= validation_split < 1.0:
+
+            raise ValueError(
+                "validation_split must be in [0, 1)."
+            )
+
+        if len(train_order) == 0:
+
+            raise ValueError(
+                "validation_split is too large: "
+                "no training ratings left."
+            )
+
+        # Computed on training rows only so the
+        # validation set stays fully unseen.
+        self.global_mean = float(
+            ratings[train_order].mean()
+        )
+
         print(
             f"Training ratings: "
             f"{len(train_order):,}"
@@ -222,6 +285,10 @@ class MatrixFactorization:
             f"Validation ratings: "
             f"{len(val_order):,}"
         )
+
+        # Without a validation set there is nothing to
+        # early-stop on, so we simply keep the final epoch.
+        has_validation = len(val_order) > 0
 
         # --------------------------------------------
         # Training history
@@ -315,40 +382,58 @@ class MatrixFactorization:
             # Best model
             # ----------------------------------------
 
-            if val_rmse < best_val_rmse:
+            if has_validation:
 
-                best_val_rmse = val_rmse
+                if val_rmse < best_val_rmse:
 
-                best_P = self.P.copy()
-                best_Q = self.Q.copy()
+                    best_val_rmse = val_rmse
 
-                best_b_u = self.b_u.copy()
-                best_b_i = self.b_i.copy()
+                    best_P = self.P.copy()
+                    best_Q = self.Q.copy()
 
-                best_epoch = epoch + 1
+                    best_b_u = self.b_u.copy()
+                    best_b_i = self.b_i.copy()
 
-                patience_counter = 0
+                    best_epoch = epoch + 1
 
-            else:
+                    patience_counter = 0
 
-                patience_counter += 1
+                else:
 
-            # ----------------------------------------
-            # Early stopping
-            # ----------------------------------------
+                    patience_counter += 1
 
-            if patience_counter >= patience:
+                # ------------------------------------
+                # Early stopping
+                # ------------------------------------
 
-                print(
-                    f"Early stopping at "
-                    f"epoch {epoch + 1}"
-                )
+                if patience_counter >= patience:
 
-                break
+                    print(
+                        f"Early stopping at "
+                        f"epoch {epoch + 1}"
+                    )
+
+                    break
 
         # --------------------------------------------
         # Restore best model
         # --------------------------------------------
+
+        if best_P is None:
+
+            if has_validation:
+
+                raise RuntimeError(
+                    "Training produced no valid "
+                    "validation score (all NaN?)."
+                )
+
+            print(
+                "No validation set: "
+                "keeping final epoch weights."
+            )
+
+            return
 
         self.P = best_P
         self.Q = best_Q

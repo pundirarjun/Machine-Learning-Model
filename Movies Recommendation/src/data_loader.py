@@ -1,7 +1,28 @@
-import pandas as pd
-import numpy as np
+from pathlib import Path
 
-def load_data(ratings_path=r"D:\Machine Learning Model\Movies Recommendation\data\ratings.csv", movies_path=r"D:\Machine Learning Model\Movies Recommendation\data\movies.csv"):
+import pandas as pd
+
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+DATA_DIR = PROJECT_ROOT / "data"
+
+
+def load_data(
+    ratings_path=None,
+    movies_path=None
+):
+    """
+    Load MovieLens ratings and movies, then map
+    raw IDs to contiguous model indices.
+    """
+
+    if ratings_path is None:
+        ratings_path = DATA_DIR / "ratings.csv"
+
+    if movies_path is None:
+        movies_path = DATA_DIR / "movies.csv"
+
     ratings = pd.read_csv(ratings_path)
     movies = pd.read_csv(movies_path)
 

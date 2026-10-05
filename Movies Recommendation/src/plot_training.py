@@ -1,7 +1,17 @@
+from pathlib import Path
+
 import numpy as np
 import matplotlib.pyplot as plt
 
-history = np.load(r"D:\Machine Learning Model\Movies Recommendation\training_history.npz")
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+HISTORY_PATH = PROJECT_ROOT / "training_history.npz"
+
+OUTPUT_PATH = PROJECT_ROOT / "Training vs Validation RMSE plot.png"
+
+
+history = np.load(HISTORY_PATH)
 
 train_rmse = history["train_rmse"]
 val_rmse = history["val_rmse"]
@@ -29,5 +39,11 @@ plt.ylabel("RMSE")
 plt.title("Training vs Validation RMSE")
 plt.legend()
 plt.grid(True)
+
+plt.tight_layout()
+
+plt.savefig(OUTPUT_PATH, dpi=150)
+
+print(f"Saved plot to {OUTPUT_PATH}")
 
 plt.show()

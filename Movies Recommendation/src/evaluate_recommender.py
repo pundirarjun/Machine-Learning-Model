@@ -1,5 +1,6 @@
+from pathlib import Path
+
 import numpy as np
-import pandas as pd
 
 from data_loader import load_data
 
@@ -7,6 +8,10 @@ from data_loader import load_data
 # ------------------------------------------------
 # Configuration
 # ------------------------------------------------
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+MODEL_PATH = PROJECT_ROOT / "model_weights.npz"
 
 K = 10
 
@@ -16,16 +21,18 @@ N_USERS = 1000
 
 RELEVANT_RATING = 4.0
 
+SEED = 42
+
 
 # ------------------------------------------------
 # Load data
 # ------------------------------------------------
 
+print("Loading data...")
+
 ratings, movies, user2idx, movie2idx, idx2movie = load_data()
 
-weights = np.load(
-    r"D:\Machine Learning Model\Movies Recommendation\model_weights.npz"
-)
+weights = np.load(MODEL_PATH)
 
 P = weights["P"]
 Q = weights["Q"]
@@ -39,20 +46,54 @@ global_mean = float(
 
 
 # ------------------------------------------------
+# Flatten ratings once
+# ------------------------------------------------
+#
+# The old version filtered the full DataFrame once
+# per user (1000 x 32M row scans). Grouping the
+# positional indices once makes evaluation orders
+# of magnitude faster.
+#
+
+user_pos = (
+    ratings
+    .groupby("user_idx")
+    .indices
+)
+
+user_idx_arr = (
+    ratings["user_idx"]
+    .values
+    .astype(np.int32)
+)
+
+movie_idx_arr = (
+    ratings["movie_idx"]
+    .values
+    .astype(np.int32)
+)
+
+rating_arr = (
+    ratings["rating"]
+    .values
+    .astype(np.float32)
+)
+
+
+# ------------------------------------------------
 # Select users with enough ratings
 # ------------------------------------------------
 
-user_counts = (
-    ratings
-    .groupby("user_idx")
-    .size()
+eligible_users = np.array(
+    [
+        user
+        for user, pos in user_pos.items()
+        if len(pos) >= MIN_RATINGS
+    ],
+    dtype=np.int32
 )
 
-eligible_users = user_counts[
-    user_counts >= MIN_RATINGS
-].index.values
-
-np.random.seed(42)
+np.random.seed(SEED)
 
 if len(eligible_users) > N_USERS:
 
@@ -89,38 +130,33 @@ ndcg_scores = []
 
 for user in test_users:
 
-    user_ratings = ratings[
-        ratings["user_idx"] == user
-    ]
+    pos = user_pos[user].copy()
 
     # Shuffle ratings
-    user_ratings = user_ratings.sample(
-        frac=1,
-        random_state=42
-    )
+    np.random.shuffle(pos)
 
     # Last 20% as test
-    split = int(
-        len(user_ratings) * 0.8
-    )
+    split = int(len(pos) * 0.8)
 
-    train_user = user_ratings.iloc[:split]
+    train_pos = pos[:split]
+    test_pos = pos[split:]
 
-    test_user = user_ratings.iloc[split:]
+    if len(test_pos) == 0:
+        continue
 
     # Relevant test movies
     relevant = set(
-        test_user[
-            test_user["rating"] >= RELEVANT_RATING
-        ]["movie_idx"]
+        movie_idx_arr[test_pos][
+            rating_arr[test_pos] >= RELEVANT_RATING
+        ].tolist()
     )
 
     if len(relevant) == 0:
         continue
 
-    # Movies already seen
+    # Movies already seen during training
     seen = set(
-        train_user["movie_idx"]
+        movie_idx_arr[train_pos].tolist()
     )
 
     # User's learned factor
@@ -135,15 +171,19 @@ for user in test_users:
     )
 
     # Don't recommend already seen movies
-    scores[
-        list(seen)
-    ] = -np.inf
+    if seen:
+
+        scores[
+            np.fromiter(seen, dtype=np.int64)
+        ] = -np.inf
 
     # Top K
+    effective_k = min(K, len(scores))
+
     top_k = np.argpartition(
         scores,
-        -K
-    )[-K:]
+        -effective_k
+    )[-effective_k:]
 
     top_k = top_k[
         np.argsort(
@@ -151,7 +191,7 @@ for user in test_users:
         )[::-1]
     ]
 
-    recommended = list(top_k)
+    recommended = top_k.tolist()
 
     # ------------------------------------------------
     # Precision@K
@@ -161,7 +201,7 @@ for user in test_users:
         set(recommended) & relevant
     )
 
-    precision = hits / K
+    precision = hits / effective_k
 
     precision_scores.append(
         precision
@@ -197,7 +237,7 @@ for user in test_users:
     # Ideal DCG
     ideal_hits = min(
         len(relevant),
-        K
+        effective_k
     )
 
     idcg = sum(
@@ -226,19 +266,40 @@ for user in test_users:
 print()
 print("=" * 40)
 
-print(
-    f"Precision@{K}: "
-    f"{np.mean(precision_scores):.4f}"
-)
+if not precision_scores:
 
-print(
-    f"Recall@{K}: "
-    f"{np.mean(recall_scores):.4f}"
-)
+    print("No eligible users evaluated.")
 
-print(
-    f"NDCG@{K}: "
-    f"{np.mean(ndcg_scores):.4f}"
-)
+else:
+
+    print(
+        f"Users evaluated: "
+        f"{len(precision_scores)}"
+    )
+
+    print(
+        f"Precision@{K}: "
+        f"{np.mean(precision_scores):.4f}"
+    )
+
+    print(
+        f"Recall@{K}: "
+        f"{np.mean(recall_scores):.4f}"
+    )
+
+    print(
+        f"NDCG@{K}: "
+        f"{np.mean(ndcg_scores):.4f}"
+    )
 
 print("=" * 40)
+
+print(
+    "WARNING: this model was trained on ALL "
+    "ratings, including the held-out ones used "
+    "here. The numbers above are therefore "
+    "OPTIMISTIC and must not be quoted as "
+    "unbiased ranking accuracy. Retrain with a "
+    "held-out split (or use cross-validation) "
+    "for valid metrics."
+)
