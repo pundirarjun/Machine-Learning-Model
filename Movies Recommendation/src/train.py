@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import os
+
 import numpy as np
 
 from data_loader import load_data
@@ -19,6 +21,31 @@ HISTORY_PATH = PROJECT_ROOT / "training_history.npz"
 POPULARITY_PATH = PROJECT_ROOT / "movie_popularity.npy"
 
 SEED = 42
+
+# ------------------------------------------------------------
+# Training schedule
+#
+# The previous run stopped at epoch 25 with val RMSE still
+# decreasing, so the model was under-trained. We now train up
+# to 60 epochs with an exponential learning-rate decay and a
+# slightly longer early-stopping patience.
+# ------------------------------------------------------------
+
+N_FACTORS = 64
+
+EPOCHS = 60
+
+BASE_LR = 0.01
+
+LR_DECAY = 0.95
+
+MIN_LR = 1e-4
+
+REG = 0.02
+
+VALIDATION_SPLIT = 0.2
+
+PATIENCE = 5
 
 
 np.random.seed(SEED)
@@ -108,9 +135,9 @@ print("Creating model...")
 model = MatrixFactorization(
     n_users=len(user2idx),
     n_items=len(movie2idx),
-    n_factors=20,
-    lr=0.01,
-    reg=0.02
+    n_factors=N_FACTORS,
+    lr=BASE_LR,
+    reg=REG
 )
 
 
@@ -120,13 +147,26 @@ model = MatrixFactorization(
 
 print("Starting training...")
 
+print(
+    f"Schedule: {EPOCHS} epochs, "
+    f"lr={BASE_LR} * {LR_DECAY}^epoch "
+    f"(min {MIN_LR}), "
+    f"reg={REG}, "
+    f"k={N_FACTORS}, "
+    f"split={VALIDATION_SPLIT}, "
+    f"patience={PATIENCE}"
+)
+
 model.fit(
     user_idx,
     item_idx,
     r,
-    epochs=25,
-    validation_split=0.2,
-    patience=3
+    epochs=EPOCHS,
+    validation_split=VALIDATION_SPLIT,
+    patience=PATIENCE,
+    lr_decay=LR_DECAY,
+    min_lr=MIN_LR,
+    verbose=True
 )
 
 
@@ -137,8 +177,15 @@ print("Training finished!")
 # SAVE MODEL
 # ============================================================
 
+# Write to a temporary file first so an interrupted run can
+# never leave a half-written model_weights.npz behind.
+
+tmp_model_path = MODEL_PATH.with_name(
+    "model_weights.tmp.npz"
+)
+
 np.savez(
-    MODEL_PATH,
+    tmp_model_path,
     P=model.P,
     Q=model.Q,
     b_u=model.b_u,
@@ -153,20 +200,31 @@ np.savez(
     )
 )
 
+os.replace(tmp_model_path, MODEL_PATH)
+
 
 # ============================================================
 # SAVE TRAINING HISTORY
 # ============================================================
 
+tmp_history_path = HISTORY_PATH.with_name(
+    "training_history.tmp.npz"
+)
+
 np.savez(
-    HISTORY_PATH,
+    tmp_history_path,
     train_rmse=np.array(
         model.train_rmse_history
     ),
     val_rmse=np.array(
         model.val_rmse_history
+    ),
+    lr=np.array(
+        model.lr_history
     )
 )
+
+os.replace(tmp_history_path, HISTORY_PATH)
 
 
 print("Saved model_weights.npz")

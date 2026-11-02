@@ -164,6 +164,7 @@ class MatrixFactorization:
         # Training history
         self.train_rmse_history = []
         self.val_rmse_history = []
+        self.lr_history = []
 
 
     def fit(
@@ -174,8 +175,21 @@ class MatrixFactorization:
         epochs=15,
         validation_split=0.2,
         patience=3,
-        verbose=True
+        verbose=True,
+        lr_decay=1.0,
+        min_lr=1e-4,
+        val_data=None
     ):
+
+        if not 0.0 < lr_decay <= 1.0:
+
+            raise ValueError(
+                "lr_decay must be in (0, 1]."
+            )
+
+        if min_lr <= 0:
+
+            raise ValueError("min_lr must be positive.")
 
         user_idx = np.asarray(
             user_idx,
@@ -239,56 +253,30 @@ class MatrixFactorization:
 
         n = len(ratings)
 
-        # --------------------------------------------
-        # Train / validation split
-        # --------------------------------------------
-
-        order = np.arange(
-            n,
-            dtype=np.int32
-        )
-
-        np.random.shuffle(order)
-
-        split = int(
-            n * (1 - validation_split)
-        )
-
-        train_order = order[:split]
-        val_order = order[split:]
-
-        if not 0.0 <= validation_split < 1.0:
-
-            raise ValueError(
-                "validation_split must be in [0, 1)."
-            )
-
-        if len(train_order) == 0:
-
-            raise ValueError(
-                "validation_split is too large: "
-                "no training ratings left."
-            )
-
-        # Computed on training rows only so the
-        # validation set stays fully unseen.
-        self.global_mean = float(
-            ratings[train_order].mean()
-        )
-
-        print(
-            f"Training ratings: "
-            f"{len(train_order):,}"
-        )
-
-        print(
-            f"Validation ratings: "
-            f"{len(val_order):,}"
-        )
-
-        # Without a validation set there is nothing to
-        # early-stop on, so we simply keep the final epoch.
-        has_validation = len(val_order) > 0
+        if val_data is not None:
+            val_user_idx, val_item_idx, val_ratings, val_order = val_data
+            train_order = np.arange(n, dtype=np.int32)
+            self.global_mean = float(ratings.mean())
+            print(f"Training ratings: {n:,}")
+            print(f"Validation ratings: {len(val_ratings):,}")
+            has_validation = len(val_ratings) > 0
+        else:
+            order = np.arange(n, dtype=np.int32)
+            np.random.shuffle(order)
+            split = int(n * (1 - validation_split))
+            train_order = order[:split]
+            val_order = order[split:]
+            if not 0.0 <= validation_split < 1.0:
+                raise ValueError("validation_split must be in [0, 1).")
+            if len(train_order) == 0:
+                raise ValueError("validation_split is too large: no training ratings left.")
+            self.global_mean = float(ratings[train_order].mean())
+            print(f"Training ratings: {len(train_order):,}")
+            print(f"Validation ratings: {len(val_order):,}")
+            has_validation = len(val_order) > 0
+            val_user_idx = user_idx
+            val_item_idx = item_idx
+            val_ratings = ratings
 
         # --------------------------------------------
         # Training history
@@ -296,6 +284,7 @@ class MatrixFactorization:
 
         self.train_rmse_history = []
         self.val_rmse_history = []
+        self.lr_history = []
 
         # --------------------------------------------
         # Best model
@@ -318,6 +307,14 @@ class MatrixFactorization:
 
         for epoch in range(epochs):
 
+            # Exponential learning-rate decay
+            epoch_lr = max(
+                self.lr * (lr_decay ** epoch),
+                min_lr
+            )
+
+            self.lr_history.append(epoch_lr)
+
             np.random.shuffle(
                 train_order
             )
@@ -332,7 +329,7 @@ class MatrixFactorization:
                 self.b_u,
                 self.b_i,
                 self.global_mean,
-                self.lr,
+                epoch_lr,
                 self.reg
             )
 
@@ -346,9 +343,9 @@ class MatrixFactorization:
             # ----------------------------------------
 
             val_rmse = validation_rmse(
-                user_idx,
-                item_idx,
-                ratings,
+                val_user_idx,
+                val_item_idx,
+                val_ratings,
                 val_order,
                 self.P,
                 self.Q,
@@ -374,6 +371,7 @@ class MatrixFactorization:
 
                 print(
                     f"Epoch {epoch + 1}/{epochs} "
+                    f"- LR: {epoch_lr:.5f} "
                     f"- Train RMSE: {train_rmse:.4f} "
                     f"- Val RMSE: {val_rmse:.4f}"
                 )

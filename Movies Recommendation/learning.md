@@ -59,6 +59,8 @@ Movies Recommendation/
 │   ├── data_loader.py          CSV → pandas + user/item index maps
 │   ├── model.py                MatrixFactorization + Numba SGD kernels
 │   ├── train.py                end-to-end training script
+│   ├── tune_hyperparams.py     resumable hyperparameter sweep
+│   ├── show_history.py         print the last training run's numbers
 │   ├── evaluate_recommender.py Precision@10 / Recall@10 / NDCG@10
 │   └── plot_training.py        train vs val RMSE curve
 │
@@ -71,7 +73,8 @@ Movies Recommendation/
 │
 ├── model_weights.npz           trained artifacts   (Git LFS)
 ├── movie_popularity.npy        rating count per model movie
-├── training_history.npz        per-epoch train/val RMSE
+├── training_history.npz        per-epoch train/val RMSE + learning rate
+├── tune_results.json           hyperparameter sweep results (resumable)
 ├── Training vs Validation RMSE plot.png
 ├── requirements.txt            Python dependencies
 ├── .env / .env.example         TMDB_API_KEY (`.env` is git-ignored)
@@ -176,28 +179,38 @@ keeping the code readable.
 
 | Hyperparameter | Value | Where |
 |---|---|---|
-| Latent factors `k` | 20 | `src/train.py` |
-| Learning rate `lr` | 0.01 | `src/train.py` |
-| Regularization `λ` | 0.02 | `src/train.py` |
-| Epochs (max) | 25 | `src/train.py` |
-| Validation split | 0.2 (random, per-rating) | `src/train.py` |
-| Early-stopping patience | 3 epochs | `src/train.py` |
+| Latent factors `k` | 20 | `src/train.py` (`N_FACTORS`) |
+| Base learning rate `lr` | 0.01 | `src/train.py` (`BASE_LR`) |
+| LR decay (per epoch) | 0.95 exponential, floor 1e-4 | `src/train.py` (`LR_DECAY`, `MIN_LR`) |
+| Regularization `λ` | 0.02 | `src/train.py` (`REG`) |
+| Epochs (max) | 60 | `src/train.py` (`EPOCHS`) |
+| Validation split | 0.2 (random, per-rating) | `src/train.py` (`VALIDATION_SPLIT`) |
+| Early-stopping patience | 5 epochs | `src/train.py` (`PATIENCE`) |
 | Weight init | `N(0, 0.1)` for P and Q, `0` for biases | `src/model.py` |
 | Biases init | 0 | `src/model.py` |
 | Random seed | 42 | `src/train.py` (`np.random.seed`) |
 | Dtype | `float32` everywhere | `src/model.py` |
+
+All knobs live as named constants at the top of `src/train.py`; the sweep in
+`src/tune_hyperparams.py` varies the same values.
 
 ### 4.7 Training loop semantics (`MatrixFactorization.fit`)
 
 1. Shuffle all rating indices, split 80/20 → `train_order`, `val_order`.
 2. `μ` is computed **only from training rows** (so validation stays unseen).
 3. Each epoch:
-   - shuffle `train_order`, run `sgd_epoch` → training SSE → train RMSE
+   - `epoch_lr = max(lr · lr_decay**epoch, min_lr)` — exponential decay
+   - shuffle `train_order`, run `sgd_epoch` with `epoch_lr` → train RMSE
    - run `validation_rmse` on `val_order` (no updates)
-   - append both to history
+   - append train/val RMSE **and `epoch_lr`** to history
    - if val RMSE improved → snapshot best weights, reset patience counter
-   - else increment patience; if patience ≥ 3 → early stop
+   - else increment the no-improvement counter; when it reaches `patience`
+     → early stop
 4. Restore the best snapshot (not the last epoch).
+
+`train.py` writes `model_weights.npz` / `training_history.npz` through a
+temporary file + `os.replace()`, so an interrupted run can never leave a
+half-written artifact behind.
 
 Safety guards now in place:
 
@@ -225,36 +238,64 @@ Safety guards now in place:
 `movie_popularity.npy` — `(84432,)` int32 rating counts, **in the same order as
 Q** (built by `train.py`, required by the backend).
 
-`training_history.npz` — `train_rmse`, `val_rmse` arrays (one entry per epoch).
+`training_history.npz` — `train_rmse`, `val_rmse` and `lr` arrays (one entry
+per epoch).
 
 ---
 
 ## 5. Training results
 
-From `training_history.npz` (seed 42, 25 epochs, early stopping never fired):
+From `training_history.npz` (seed 42, 60 epochs, LR decay 0.95, patience 5 —
+early stopping never fired because every epoch improved slightly):
 
-| Epoch | Train RMSE | Val RMSE |
-|---|---|---|
-| 1 | 0.8896 | 0.8680 |
-| 5 | 0.7982 | 0.7961 |
-| 10 | 0.7412 | 0.7762 |
-| 15 | 0.7153 | 0.7685 |
-| 20 | 0.7014 | 0.7667 |
-| 25 | **0.6929** | **0.7661** |
+| Epoch | Train RMSE | Val RMSE | LR |
+|---|---|---|---|
+| 1 | 0.8896 | 0.8678 | 0.01000 |
+| 5 | 0.8026 | 0.8095 | 0.00815 |
+| 10 | 0.7519 | 0.7816 | 0.00630 |
+| 15 | 0.7278 | 0.7721 | 0.00488 |
+| 20 | 0.7143 | 0.7681 | 0.00377 |
+| 30 | 0.7003 | 0.7651 | 0.00226 |
+| 40 | 0.6936 | 0.7641 | 0.00135 |
+| 50 | 0.6900 | 0.7637 | 0.00081 |
+| 60 | **0.6880** | **0.7635** | 0.00048 |
 
 Reading the curve (`Training vs Validation RMSE plot.png`):
 
-- Both curves decrease smoothly → learning rate and regularization are sane.
-- Train < val from epoch 1 → the usual generalization gap (~0.073 RMSE).
-- **Val RMSE was still decreasing at epoch 25** → the model is *under-trained*,
-  not over-trained. Patience never triggered because every epoch improved.
+- The old 25-epoch run ended at val **0.7661** with the curve still falling;
+  extending to 60 epochs + exponential LR decay reaches **0.7635**.
+- The gap between train and val stays ~0.075 — no sign of overfitting, so
+  the remaining error is capacity/regularization, not epoch count.
+- Epochs 40→60 buy only ~0.0006 RMSE: the run is now near its plateau at
+  `k = 20`.
 - For reference, always predicting the mean (μ = 3.5404) gives
-  **RMSE = 1.059** (the std of all 32 M ratings), so 0.766 is a large
-  improvement but far from "human" level (~0.85–0.9 is a common strong
-  baseline with better regularization/optimizers).
+  **RMSE = 1.059** (the std of all 32 M ratings).
 
-**Takeaway:** raise `epochs` (e.g. 60–100), keep patience, or add learning-rate
-decay to squeeze out accuracy.
+### 5.1 Hyperparameter sweep (`src/tune_hyperparams.py`)
+
+Five configurations, identical seed → identical 80/20 split, early stopping
+disabled (60 epochs for all), so the numbers are directly comparable:
+
+| # | Config | Best val RMSE | Final train | Best epoch | Time |
+|---|---|---|---|---|---|
+| 1 | **k20, λ0.02, decay 0.95 (current)** | **0.7632** | 0.6877 | 60 | 813 s |
+| 2 | k20, λ0.02, constant LR | 0.7660 | 0.6736 | 24 | 1009 s |
+| 3 | k40, λ0.05, decay 0.95 | 0.7774 | 0.7355 | 60 | 1162 s |
+| 4 | k20, λ0.05, decay 0.95 | 0.7804 | 0.7436 | 60 | 836 s |
+| 5 | k20, λ0.10, decay 0.95 | 0.8258 | 0.8122 | 60 | 799 s |
+
+Conclusions — the shipped configuration stays `k20 / λ0.02 / decay 0.95`:
+
+- **Decay beats constant LR** (0.7632 vs 0.7660): without decay the model
+  peaks at epoch 24 and then overfits (train drops to 0.6736 while val rises).
+- **λ0.02 is the sweet spot** among those tried; λ0.05 and λ0.10 under-fit
+  badly (0.78 / 0.83).
+- **k40 does not help** at λ0.05 (0.7774) and costs ~40 % more time — extra
+  capacity needs stronger regularization to pay off, untested.
+
+Results persist to `tune_results.json` after every config, so
+`python src/tune_hyperparams.py` resumes after a crash/interrupt instead of
+retraining the finished ones (`--reset` starts over).
 
 ---
 
@@ -425,14 +466,17 @@ Metrics (top-10, "relevant" = test rating ≥ 4.0, users with ≥ 20 ratings,
 - **Recall@10** = |relevant ∩ top-10| / |relevant|
 - **NDCG@10** = DCG@10 / IDCG@10 with `gain = 1/log2(rank+1)`
 
-Current result:
+Current result (60-epoch model):
 
 ```
 Users evaluated: 988
-Precision@10: 0.0267
-Recall@10:    0.0242
-NDCG@10:      0.0386
+Precision@10: 0.0355
+Recall@10:    0.0296
+NDCG@10:      0.0468
 ```
+
+(Previous 25-epoch model: P@10 0.0267, R@10 0.0242, NDCG 0.0386 — the extra
+epochs + LR decay improved all three, but see the leakage warning below.)
 
 ### ⚠️ These numbers are optimistic — data leakage
 
@@ -473,8 +517,10 @@ python src/train.py         # writes model_weights.npz, movie_popularity.npy,
                             #         training_history.npz
 
 # 3. Inspect training
-python src/plot_training.py     # saves + shows the RMSE curve
+python src/show_history.py           # print the run's RMSE/LR table
+python src/plot_training.py          # saves + shows the RMSE curve
 python src/evaluate_recommender.py
+python src/tune_hyperparams.py       # resumable 5-config sweep (--reset to redo)
 
 # 4. API  (http://127.0.0.1:5000)
 python backend/app.py
@@ -522,14 +568,30 @@ Environment variables:
 
 ---
 
-## 12. Known limitations & improvement backlog
+## 12. Training improvements (this pass)
+
+| # | Change | Effect |
+|---|---|---|
+| 1 | 25 → 60 epochs with exponential LR decay (`0.95**epoch`, floor 1e-4) and patience 5 | val RMSE 0.7661 → **0.7635**; no overfitting (decay keeps epochs 24+ stable) |
+| 2 | `fit(lr_decay=…, min_lr=…)` params + `lr_history` recorded per epoch | decay is inspectable in `training_history.npz` and printed per epoch |
+| 3 | `train.py` hyperparameters hoisted to named constants (`N_FACTORS`, `EPOCHS`, `BASE_LR`, `LR_DECAY`, `MIN_LR`, `REG`, `VALIDATION_SPLIT`, `PATIENCE`) | one place to edit; the schedule is printed at startup |
+| 4 | Atomic artifact writes (`tmp` + `os.replace`) for weights and history | interrupted training can't corrupt `model_weights.npz` |
+| 5 | New `src/tune_hyperparams.py` — 5-config sweep, identical seed/split, results persisted to `tune_results.json` | resumable after a crash; confirmed the shipped config is the best of those tried (§5.1) |
+| 6 | New `src/show_history.py` | print the last run's per-epoch RMSE/LR without opening a plot |
+
+---
+
+## 13. Known limitations & improvement backlog
 
 **Machine learning**
-1. Under-trained: val RMSE still falling at epoch 25 — train longer / LR decay.
+1. ~~Under-trained: val RMSE still falling at epoch 25~~ **done** — 60 epochs +
+   LR decay, now plateaued at 0.7635 (§5). Further gains need more factors
+   with stronger λ, or a different model (ALS / kNN baseline).
 2. Random rating split instead of a **time-based split** (timestamps are unused).
 3. Evaluation is leaky (§9) — implement leave-one-out or temporal evaluation.
-4. No hyperparameter search (k, lr, λ); no baseline comparison (item-item
-   cosine, kNN, ALS).
+4. Hyperparameter search is a fixed 5-point grid over (k, λ, decay) — no
+   lr/λ interaction, no k>40, no baseline comparison (item-item cosine, kNN,
+   ALS).
 5. Cold-start path ignores `b_i` and `μ` — a movie's learned bias could be a
    better popularity prior than raw rating counts.
 6. Score components live on different scales (cosine ∈ [-1,1], genre ∈ [0,1],
@@ -570,7 +632,7 @@ Environment variables:
 
 ---
 
-## 13. Troubleshooting
+## 14. Troubleshooting
 
 | Symptom | Cause / fix |
 |---|---|

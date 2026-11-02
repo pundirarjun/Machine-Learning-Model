@@ -7,6 +7,7 @@ import os
 import re
 import time
 from urllib.parse import quote
+from scipy.sparse import csr_matrix
 
 from dotenv import load_dotenv
 
@@ -1110,6 +1111,26 @@ if len(Q) != len(popularity):
         "Q matrix and popularity "
         "have different lengths."
     )
+
+
+# ============================================================
+# LOAD ITEM-ITEM SIMILARITY
+# ============================================================
+
+ITEM_ITEM_SIM_PATH = PROJECT_ROOT / "item_item_sim.npz"
+
+print("Loading item-item similarity...")
+
+if ITEM_ITEM_SIM_PATH.exists():
+    with np.load(ITEM_ITEM_SIM_PATH) as data:
+        item_item_sim = csr_matrix(
+            (data['data'], data['indices'], data['indptr']),
+            shape=data['shape']
+        )
+    print(f"Loaded item-item similarity: {item_item_sim.shape}, {item_item_sim.nnz:,} non-zero")
+else:
+    print("WARNING: item_item_sim.npz not found. Run src/item_item_cf.py first.")
+    item_item_sim = None
 
 
 # ============================================================

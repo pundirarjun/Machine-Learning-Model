@@ -11,8 +11,12 @@ __pycache__/
 .idea/
 .kilo/
 *.log
+*.log.err
 
 # Build output
 dist/
 dist-ssr/
 *.local
+
+
+data

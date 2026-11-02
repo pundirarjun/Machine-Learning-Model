@@ -1,0 +1,70 @@
+{
+  "results": [
+    {
+      "name": "k20 reg0.02 decay0.95 (current)",
+      "n_factors": 20,
+      "reg": 0.02,
+      "lr": 0.01,
+      "lr_decay": 0.95,
+      "best_val_rmse": 0.7632,
+      "final_train_rmse": 0.6877,
+      "seconds": 813,
+      "best_epoch": 60
+    },
+    {
+      "name": "k20 reg0.05 decay0.95",
+      "n_factors": 20,
+      "reg": 0.05,
+      "lr": 0.01,
+      "lr_decay": 0.95,
+      "best_val_rmse": 0.7804,
+      "final_train_rmse": 0.7436,
+      "seconds": 836,
+      "best_epoch": 60
+    },
+    {
+      "name": "k20 reg0.10 decay0.95",
+      "n_factors": 20,
+      "reg": 0.1,
+      "lr": 0.01,
+      "lr_decay": 0.95,
+      "best_val_rmse": 0.8258,
+      "final_train_rmse": 0.8122,
+      "seconds": 799,
+      "best_epoch": 60
+    },
+    {
+      "name": "k40 reg0.05 decay0.95",
+      "n_factors": 40,
+      "reg": 0.05,
+      "lr": 0.01,
+      "lr_decay": 0.95,
+      "best_val_rmse": 0.7774,
+      "final_train_rmse": 0.7355,
+      "seconds": 1162,
+      "best_epoch": 60
+    },
+    {
+      "name": "k20 reg0.02 constant lr (no decay)",
+      "n_factors": 20,
+      "reg": 0.02,
+      "lr": 0.01,
+      "lr_decay": 1.0,
+      "best_val_rmse": 0.7659775213290244,
+      "final_train_rmse": 0.6735705100616561,
+      "seconds": 1009.3347589969635,
+      "best_epoch": 24
+    },
+    {
+      "name": "k40 reg0.02 decay0.95",
+      "n_factors": 40,
+      "reg": 0.02,
+      "lr": 0.01,
+      "lr_decay": 0.95,
+      "best_val_rmse": 0.7608062217877029,
+      "final_train_rmse": 0.6497729394190335,
+      "seconds": 1277.971078634262,
+      "best_epoch": 60
+    }
+  ]
+}

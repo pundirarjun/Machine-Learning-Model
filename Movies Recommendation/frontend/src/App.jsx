@@ -40,10 +40,6 @@ function App() {
     "Classic / older films",
   ];
 
-  // ============================================================
-  // GENRE SELECTION
-  // ============================================================
-
   const toggleGenre = (genre) => {
     setSelectedGenres((current) =>
       current.includes(genre)
@@ -51,10 +47,6 @@ function App() {
         : [...current, genre]
     );
   };
-
-  // ============================================================
-  // GET RECOMMENDATIONS
-  // ============================================================
 
   const getRecommendations = async () => {
     setLoading(true);
@@ -77,7 +69,7 @@ function App() {
         .filter(Boolean);
 
       if (movieList.length === 0) {
-        setError("Please enter at least one movie.");
+        setError("Enter at least one movie.");
         return;
       }
 
@@ -105,16 +97,14 @@ function App() {
       try {
         data = await response.json();
       } catch {
-        throw new Error(
-          "The recommendation server returned an invalid response."
-        );
+        throw new Error("The server returned an invalid response.");
       }
 
       // The backend sends an `error` field for failed
       // requests AND for some 200 responses, so check both.
       if (!response.ok) {
         throw new Error(
-          data.error || "Failed to get recommendations."
+          data.error || "Could not get recommendations."
         );
       }
 
@@ -135,9 +125,7 @@ function App() {
       );
 
       if (results.length === 0 && !data.error) {
-        setError(
-          "No recommendations matched your filters. Try different movies, genres or mood."
-        );
+        setError("Nothing matched those filters.");
         return;
       }
 
@@ -155,13 +143,11 @@ function App() {
       console.error(err);
 
       if (err.name === "AbortError") {
-        setError(
-          "The request timed out. Please try again."
-        );
+        setError("The request timed out. Try again.");
       } else {
         setError(
           err.message ||
-          "Could not connect to the recommendation server."
+            "Could not connect to the server."
         );
       }
 
@@ -171,25 +157,11 @@ function App() {
     }
   };
 
-  // ============================================================
-  // POSTER ERROR FALLBACK
-  // ============================================================
-
-  const handlePosterError = (event, movie) => {
+  const handlePosterError = (event) => {
     // Prevent infinite image-error loop
     event.currentTarget.onerror = null;
-
-    const fallbackTitle = encodeURIComponent(
-      movie.title || "Movie"
-    );
-
-    event.currentTarget.src =
-      `https://placehold.co/500x750/11131a/ffffff?text=${fallbackTitle}`;
+    event.currentTarget.style.display = "none";
   };
-
-  // ============================================================
-  // OPEN TRAILER
-  // ============================================================
 
   const openTrailer = (movie) => {
     if (!movie.trailer) {
@@ -203,558 +175,200 @@ function App() {
     );
   };
 
-  // ============================================================
-  // RENDER
-  // ============================================================
-
   return (
     <div className="app">
 
-      {/* ======================================================
-          NAVBAR
-      ====================================================== */}
+      <header className="site-header">
+        <div className="site-name">CineMatch</div>
+      </header>
 
-      <nav className="navbar">
+      <main className="page">
 
-        <div className="logo">
-          🎬 CineMatch
-        </div>
+        <h1>Tell me what you've watched</h1>
 
-      </nav>
+        <p className="lede">
+          One movie per line, then pick a few genres and a mood.
+        </p>
 
+        <textarea
+          value={movies}
+          onChange={(e) => setMovies(e.target.value)}
+          aria-label="Movies you have watched, one per line"
+          placeholder="e.g. The Matrix, Aliens"
+        />
 
-      {/* ======================================================
-          HERO
-      ====================================================== */}
+        <div className="field">
+          <span className="field-label">Genres</span>
 
-      <section className="hero">
-
-        <div className="hero-content">
-
-
-          <h1>
-            Find your next
-            <span> favorite movie.</span>
-          </h1>
-
-          <p className="hero-description">
-            Tell us what you enjoy and we'll discover
-            movies that match your taste.
-          </p>
-
-          <button
-            className="hero-button"
-            onClick={() => {
-              document
-                .getElementById("discover")
-                ?.scrollIntoView({
-                  behavior: "smooth",
-                });
-            }}
-          >
-            Start Discovering ↓
-          </button>
-
-        </div>
-
-      </section>
-
-
-      {/* ======================================================
-          DISCOVER
-      ====================================================== */}
-
-      <main
-        className="discover"
-        id="discover"
-      >
-
-        <div className="section-heading">
-
-          <p>
-            PERSONALIZE YOUR EXPERIENCE
-          </p>
-
-          <h2>
-            What are you in the mood for?
-          </h2>
-
-          <span>
-            Give us a few preferences and we'll do the rest.
-          </span>
-
-        </div>
-
-
-        {/* ==================================================
-            GENRES
-        ================================================== */}
-
-        <div className="preference-section">
-
-          <h3>
-            01. Pick your genres
-          </h3>
-
-          <div className="genre-list">
-
+          <div className="tag-list">
             {genres.map((genre) => (
-
               <button
                 key={genre}
                 type="button"
                 className={
                   selectedGenres.includes(genre)
-                    ? "genre active"
-                    : "genre"
+                    ? "tag active"
+                    : "tag"
                 }
                 onClick={() => toggleGenre(genre)}
               >
                 {genre}
               </button>
-
             ))}
-
           </div>
-
         </div>
 
+        <div className="field">
+          <span className="field-label">Mood</span>
 
-        {/* ==================================================
-            MOOD
-        ================================================== */}
-
-        <div className="preference-section">
-
-          <h3>
-            02. Choose your mood
-          </h3>
-
-          <div className="mood-grid">
-
+          <div className="tag-list">
             {moods.map((item) => (
-
               <button
                 key={item}
                 type="button"
-                className={
-                  mood === item
-                    ? "mood-card active"
-                    : "mood-card"
-                }
+                className={mood === item ? "tag active" : "tag"}
                 onClick={() => setMood(item)}
               >
-
-                <div className="mood-icon">
-
-                  {item === "Something popular" && "🔥"}
-
-                  {item === "Hidden gem / underrated" && "💎"}
-
-                  {item === "Recent releases" && "✨"}
-
-                  {item === "Classic / older films" && "🎞️"}
-
-                </div>
-
-                <div>
-
-                  <strong>
-                    {item}
-                  </strong>
-
-                  <p>
-
-                    {item === "Something popular" &&
-                      "Popular with movie lovers"}
-
-                    {item === "Hidden gem / underrated" &&
-                      "Discover something different"}
-
-                    {item === "Recent releases" &&
-                      "Movies from recent years"}
-
-                    {item === "Classic / older films" &&
-                      "Timeless movies worth watching"}
-
-                  </p>
-
-                </div>
-
+                {item}
               </button>
-
             ))}
-
           </div>
-
         </div>
 
+        {error && <p className="error">{error}</p>}
 
-        {/* ==================================================
-            MOVIES
-        ================================================== */}
-
-        <div className="preference-section">
-
-          <h3>
-            03. Movies you've enjoyed
-          </h3>
-
-          <p className="section-description">
-            Enter movies you've recently enjoyed.
-            One movie per line.
-          </p>
-
-          <textarea
-            value={movies}
-            onChange={(e) =>
-              setMovies(e.target.value)
-            }
-            aria-label="Movies you have enjoyed, one per line"
-            placeholder={
-              "Iron Man\nAvengers\nInterstellar"
-            }
-          />
-
-        </div>
-
-
-        {/* ==================================================
-            ERROR
-        ================================================== */}
-
-        {error && (
-
-          <div className="error-message">
-            {error}
-          </div>
-
-        )}
-
-
-        {/* ==================================================
-            GENERATE BUTTON
-        ================================================== */}
-
-        <div className="recommend-container">
-
-          <button
-            className="recommend-button"
-            onClick={getRecommendations}
-            disabled={loading}
-          >
-
-            {loading
-              ? "Finding movies..."
-              : "✨ Generate Recommendations"}
-
-          </button>
-
-        </div>
-
-
-        {/* ==================================================
-            MATCHED MOVIES
-        ================================================== */}
+        <button
+          className="submit"
+          onClick={getRecommendations}
+          disabled={loading}
+        >
+          {loading ? "Loading..." : "Get recommendations"}
+        </button>
 
         {matchedMovies.length > 0 && (
-
-          <div className="matched-section">
-
-            <p className="matched-label">
-              Based on your movies
-            </p>
-
-            <div className="matched-movies">
-
-              {matchedMovies.map(
-                (movie, index) => (
-
-                  <span
-                    className="matched-movie"
-                    key={`${movie}-${index}`}
-                  >
-                    {movie}
-                  </span>
-
-                )
-              )}
-
-            </div>
-
-          </div>
-
+          <p className="based-on">
+            Based on: {matchedMovies.join(", ")}
+          </p>
         )}
-
-
-        {/* ==================================================
-            UNMATCHED MOVIES
-        ================================================== */}
 
         {unmatchedMovies.length > 0 && (
-
-          <div className="unmatched-message">
-
-            Couldn't find:
-
-            {" "}
-
-            {unmatchedMovies.join(", ")}
-
-          </div>
-
+          <p className="unmatched">
+            Couldn't find: {unmatchedMovies.join(", ")}
+          </p>
         )}
 
-
-        {/* ==================================================
-            RECOMMENDATIONS
-        ================================================== */}
-
         {recommendations.length > 0 && (
+          <section className="results" id="recommendations">
+            <h2>Results</h2>
 
-          <section
-            className="recommendations-section"
-            id="recommendations"
-          >
+            <div className="grid">
+              {recommendations.map((movie, index) => {
+                const yearMatch = movie.title
+                  ? movie.title.match(/\((\d{4})\)/)
+                  : null;
 
-            <div className="recommendations-heading">
+                const title = yearMatch
+                  ? movie.title.replace(/\s*\(\d{4}\)/, "")
+                  : movie.title;
 
-              <p>
-                YOUR PERSONALIZED RESULTS
-              </p>
-
-              <h2>
-                🎯 Recommended for you
-              </h2>
-
-              <span>
-                Based on your taste and preferences
-              </span>
-
-            </div>
-
-
-            <div className="movie-grid">
-
-              {recommendations.map(
-                (movie, index) => (
-
+                return (
                   <article
-                    className={
-                      index === 0
-                        ? "movie-card featured"
-                        : "movie-card"
-                    }
+                    className="card"
                     key={
                       movie.movieId ||
                       `${movie.title}-${index}`
                     }
                   >
-
-                    {/* ======================================
-                        POSTER
-                    ====================================== */}
-
                     <div
-                      className="poster-container"
-                      onClick={() =>
-                        openTrailer(movie)
-                      }
-                      role={
-                        movie.trailer
-                          ? "button"
-                          : undefined
-                      }
-                      tabIndex={
-                        movie.trailer
-                          ? 0
-                          : undefined
-                      }
+                      className="poster"
+                      onClick={() => openTrailer(movie)}
+                      role={movie.trailer ? "button" : undefined}
+                      tabIndex={movie.trailer ? 0 : undefined}
                       onKeyDown={(event) => {
-
                         if (
                           event.key === "Enter" ||
                           event.key === " "
                         ) {
-
                           event.preventDefault();
-
                           openTrailer(movie);
-
                         }
-
                       }}
                     >
-
-                      <img
-                        src={
-                          movie.poster ||
-                          `https://placehold.co/500x750/11131a/ffffff?text=${encodeURIComponent(
-                            movie.title || "Movie"
-                          )}`
-                        }
-                        alt={
-                          `${movie.title} poster`
-                        }
-                        className="movie-poster"
-                        loading={
-                          index < 4
-                            ? "eager"
-                            : "lazy"
-                        }
-                        onError={(event) =>
-                          handlePosterError(
-                            event,
-                            movie
-                          )
-                        }
-                      />
-
-
-                      {/* ==================================
-                          PLAY OVERLAY
-                      ================================== */}
-
-                      {movie.trailer && (
-
-                        <div className="poster-overlay">
-
-                          <div className="play-button">
-                            ▶
-                          </div>
-
-                          <span>
-                            Watch Trailer
-                          </span>
-
-                        </div>
-
-                      )}
-
-
-                      {/* ==================================
-                          RANK
-                      ================================== */}
-
-                      <div className="movie-rank">
-                        #{index + 1}
+                      <div className="poster-fallback">
+                        <span>{movie.title}</span>
                       </div>
 
+                      {movie.poster && (
+                        <img
+                          src={movie.poster}
+                          alt={`${movie.title} poster`}
+                          loading={
+                            index < 4 ? "eager" : "lazy"
+                          }
+                          onError={handlePosterError}
+                        />
+                      )}
                     </div>
 
-
-                    {/* ======================================
-                        MOVIE INFORMATION
-                    ====================================== */}
-
-                    <div className="movie-info">
-
+                    <div className="info">
                       <h3>
-                        {movie.title}
+                        {index + 1}. {title}
+                        {yearMatch && (
+                          <span className="year">
+                            {" "}
+                            {yearMatch[1]}
+                          </span>
+                        )}
                       </h3>
 
-
-                      {/* GENRES */}
-
-                      <p className="movie-genres">
-                        {movie.genres}
+                      <p className="genres-line">
+                        {(movie.genres || "").replace(
+                          /\|/g,
+                          " / "
+                        )}
                       </p>
 
-
-                      {/* SCORE */}
-
-                      <div className="movie-score">
-
-                        <span>
-                          ⭐
-                        </span>
-
-                        <strong>
-                          {Number(
-                            movie.score || 0
-                          ).toFixed(3)}
-                        </strong>
-
-                      </div>
-
-
-                      {/* DIVIDER */}
-
-                      <div className="movie-divider" />
-
-
-                      {/* REASONS */}
+                      <p className="score">
+                        {Number(movie.score || 0).toFixed(2)}{" "}
+                        <span>match</span>
+                      </p>
 
                       {movie.reasons &&
                         movie.reasons.length > 0 && (
-
-                        <div className="movie-reasons">
-
-                          {movie.reasons.map(
-                            (reason, reasonIndex) => (
-
-                              <p
-                                key={
-                                  `${reason}-${reasonIndex}`
-                                }
-                              >
-                                🎯 {reason}
-                              </p>
-
-                            )
-                          )}
-
-                        </div>
-
-                      )}
-
-
-                      {/* TRAILER BUTTON */}
+                          <ul className="reasons">
+                            {movie.reasons.map(
+                              (reason, reasonIndex) => (
+                                <li
+                                  key={`${reason}-${reasonIndex}`}
+                                >
+                                  {reason}
+                                </li>
+                              )
+                            )}
+                          </ul>
+                        )}
 
                       {movie.trailer && (
-
                         <button
                           type="button"
-                          className="trailer-button"
-                          onClick={() =>
-                            openTrailer(movie)
-                          }
+                          className="trailer-link"
+                          onClick={() => openTrailer(movie)}
                         >
-                          ▶ Watch Trailer
+                          Trailer
                         </button>
-
                       )}
-
                     </div>
-
                   </article>
-
-                )
-              )}
-
+                );
+              })}
             </div>
-
           </section>
-
         )}
 
       </main>
 
-
-      {/* ======================================================
-          FOOTER
-      ====================================================== */}
-
-      <footer>
-
-        <div>
-          🎬 CineMatch
-        </div>
-
-        <span>
-          Model: Matrix Factorization
-        </span>
-
+      <footer className="site-footer">
+        Model: matrix factorization
       </footer>
 
     </div>

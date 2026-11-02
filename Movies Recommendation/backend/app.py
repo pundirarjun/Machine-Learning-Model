@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 import os
 import traceback
+from pathlib import Path
 
 
 # ============================================================
@@ -75,6 +76,9 @@ CORS(
 
 print("Loading recommendation model...")
 
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+
 from recommender import (
     movies,
     Q,
@@ -86,7 +90,10 @@ from recommender import (
     popularity,
     normalize_title,
     get_movie_media,
+    item_item_sim,
 )
+
+from item_item_cf import hybrid_scores
 
 print("Recommendation model loaded!")
 print(f"Movies in dataset: {len(movies):,}")
@@ -808,12 +815,39 @@ def recommend():
 
 
         # ----------------------------------------------------
-        # Content score
+        # Content score (MF)
         # ----------------------------------------------------
 
         content_score = (
             Q_norm @ p_u
         )
+
+
+        # ----------------------------------------------------
+        # Item-Item CF score
+        # ----------------------------------------------------
+
+        if item_item_sim is not None and liked_idxs:
+            liked_set = set(liked_idxs)
+            sim_subset = item_item_sim[liked_idxs]
+            ii_raw = sim_subset.sum(axis=0).A1
+            ii_raw[list(liked_set)] = -np.inf
+        else:
+            ii_raw = np.full(len(Q), -np.inf, dtype=np.float32)
+
+        ii_scores = np.nan_to_num(ii_raw, neginf=-1e9)
+
+        # Normalize II scores to [0, 1] range
+        finite_mask = ii_scores > -1e8
+        if finite_mask.any():
+            ii_min = ii_scores[finite_mask].min()
+            ii_max = ii_scores[finite_mask].max()
+            if ii_max > ii_min:
+                ii_scores_norm = (ii_scores - ii_min) / (ii_max - ii_min)
+            else:
+                ii_scores_norm = np.zeros_like(ii_scores)
+        else:
+            ii_scores_norm = np.zeros_like(ii_scores)
 
 
         # ----------------------------------------------------
@@ -833,47 +867,39 @@ def recommend():
 
         if mood == "Something popular":
 
-            final_scores = (
-
-                0.65
+            mf_component = (
+                0.60
                 * content_score
-
                 +
-
                 0.20
                 * genre_scores
-
                 +
-
                 0.15
                 * popularity_score
-
             )
+
+            final_scores = hybrid_scores(mf_component, ii_scores_norm, alpha=0.65)
 
 
         elif mood == "Hidden gem / underrated":
 
-            final_scores = (
-
-                0.75
+            mf_component = (
+                0.70
                 * content_score
-
                 +
-
                 0.20
                 * genre_scores
-
                 -
-
                 0.05
                 * popularity_score
-
             )
+
+            final_scores = hybrid_scores(mf_component, ii_scores_norm, alpha=0.70)
 
 
         else:
 
-            final_scores = (
+            mf_component = (
 
                 0.75
                 * content_score
@@ -884,6 +910,9 @@ def recommend():
                 * genre_scores
 
             )
+
+
+            final_scores = hybrid_scores(mf_component, ii_scores_norm, alpha=0.75)
 
 
         # ----------------------------------------------------
@@ -1147,36 +1176,8 @@ def recommend():
 
 
             # ------------------------------------------------
-            # Poster + YouTube trailer
-            # ------------------------------------------------
-
-            try:
-
-                media = get_movie_media(
-                    str(title)
-                )
-
-                poster = media.get(
-                    "poster"
-                )
-
-                trailer = media.get(
-                    "trailer"
-                )
-
-            except Exception as media_error:
-
-                print(
-                    "TMDB media error:",
-                    media_error
-                )
-
-                poster = None
-                trailer = None
-
-
-            # ------------------------------------------------
             # Recommendation object
+            # (media fetched in parallel after the loop)
             # ------------------------------------------------
 
             recommendations.append({
@@ -1199,15 +1200,54 @@ def recommend():
                     ),
 
                 "poster":
-                    poster,
+                    None,
 
                 "trailer":
-                    trailer,
+                    None,
 
                 "reasons":
                     reasons
 
             })
+
+
+        # ----------------------------------------------------
+        # Fetch posters + trailers in parallel
+        # ----------------------------------------------------
+
+        from concurrent.futures import ThreadPoolExecutor
+
+        titles = [rec["title"] for rec in recommendations]
+
+
+        def _fetch_media(t):
+
+            try:
+
+                return get_movie_media(t)
+
+            except Exception:
+
+                return {"poster": None, "trailer": None}
+
+
+        if titles:
+
+            with ThreadPoolExecutor(max_workers=10) as pool:
+
+                media_results = list(
+                    pool.map(_fetch_media, titles)
+                )
+
+
+            for rec, media in zip(
+                recommendations,
+                media_results
+            ):
+
+                rec["poster"] = media.get("poster")
+
+                rec["trailer"] = media.get("trailer")
 
 
         # ----------------------------------------------------
